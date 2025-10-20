@@ -7,31 +7,66 @@ import numpy as np
 import requests
 from google.cloud import bigquery
 from google.oauth2 import service_account
+import json # Adicione este import para lidar com JSON
+from streamlit.errors import StreamlitSecretNotFoundError # Importe o erro específico do Streamlit
 
 # --- 1. Configuração e Autenticação com o Google BigQuery ---
 
-# 🚨 IMPORTANTE: SUBSTITUA ESTE CAMINHO PELO CAMINHO REAL DO SEU ARQUIVO JSON
-GOOGLE_APPLICATION_CREDENTIALS = 'credentials/chave-de-servico.json'
+credentials = None
+project_id = None
 
-# Verifique se o arquivo de credenciais existe
-if not os.path.exists(CREDENTIALS_PATH):
-    st.error(f"ERRO: Arquivo de credenciais não encontrado em '{CREDENTIALS_PATH}'.")
-    st.error("Por favor, verifique o caminho e o nome do arquivo JSON da sua conta de serviço.")
+# Caminho para o arquivo de credenciais local (para desenvolvimento)
+CREDENTIALS_PATH_LOCAL = 'credentials/chave-de-servico.json'
+
+# --- Lógica de Carregamento de Credenciais ---
+
+# 1. Tentar carregar credenciais do arquivo local (prioridade para desenvolvimento)
+if os.path.exists(CREDENTIALS_PATH_LOCAL):
+    try:
+        credentials = service_account.Credentials.from_service_account_file(CREDENTIALS_PATH_LOCAL)
+        project_id = credentials.project_id
+        #st.success("Credenciais carregadas do arquivo local para desenvolvimento.")
+    except Exception as e:
+        st.error(f"Erro ao carregar credenciais do arquivo local '{CREDENTIALS_PATH_LOCAL}': {e}")
+        st.error("Verifique se o arquivo JSON está válido e as permissões.")
+        st.stop()
+else:
+    # 2. Se não encontrou o arquivo local, tentar carregar dos Streamlit Secrets
+    #    (para deploy no Streamlit Cloud ou para dev com secrets.toml)
+    try:
+        # Verifica se a chave está presente nos secrets
+        if "GOOGLE_APPLICATION_CREDENTIALS" in st.secrets:
+            # Carrega a string JSON do secret e converte para dicionário
+            credentials_info = json.loads(st.secrets["GOOGLE_APPLICATION_CREDENTIALS"])
+            credentials = service_account.Credentials.from_service_account_info(credentials_info)
+            project_id = credentials_info.get("project_id") # O project_id está dentro do JSON
+            st.success("Credenciais carregadas do Streamlit Secrets (ambiente de deploy).")
+        else:
+            st.error("ERRO: Credenciais 'GOOGLE_APPLICATION_CREDENTIALS' não encontradas nos Streamlit Secrets.")
+            st.error("Certifique-se de configurar GOOGLE_APPLICATION_CREDENTIALS na interface do Streamlit Cloud.")
+            st.stop()
+    except StreamlitSecretNotFoundError:
+        # Este erro acontece se não há nenhum arquivo secrets.toml/secret dir localmente.
+        # É esperado quando rodando localmente sem um secrets.toml e sem o arquivo local de credenciais.
+        st.error(f"ERRO: Credenciais não carregadas. Nenhum arquivo secrets.toml encontrado localmente "
+                 f"e o arquivo '{CREDENTIALS_PATH_LOCAL}' também não existe.")
+        st.error("Para desenvolvimento local, coloque 'chave-de-servico.json' em 'credentials/'.")
+        st.error("Para deploy, configure 'GOOGLE_APPLICATION_CREDENTIALS' nos Secrets do Streamlit Cloud.")
+        st.stop()
+    except Exception as e:
+        # Captura outros erros inesperados ao carregar de st.secrets
+        st.error(f"Erro inesperado ao carregar credenciais do Streamlit Secrets: {e}")
+        st.stop()
+
+# Se chegamos até aqui e as credenciais foram carregadas com sucesso, podemos criar o cliente BigQuery.
+if credentials and project_id:
+    client = bigquery.Client(credentials=credentials, project=project_id)
+else:
+    st.error("ERRO FATAL: Credenciais ou Project ID não foram carregados com sucesso. Verifique a configuração.")
     st.stop()
 
-# Carrega as credenciais do arquivo JSON
-try:
-    credentials = service_account.Credentials.from_service_account_file(CREDENTIALS_PATH)
-    project_id = credentials.project_id
-except Exception as e:
-    st.error(f"Erro ao carregar as credenciais do BigQuery: {e}")
-    st.error("Verifique se o arquivo JSON está válido e as permissões.")
-    st.stop()
 
-# Crie um cliente BigQuery usando as credenciais carregadas
-client = bigquery.Client(credentials=credentials, project=project_id)
-
-# --- Constantes e Funções Auxiliares ---
+# --- Restante das Constantes e Funções Auxiliares ---
 TAXA_ADWORK_PERCENT = 0.17 # 17% (a taxa percentual em si, usada para cálculo)
 DEFAULT_USD_BRL_RATE = 5.00 # Cotação padrão para caso a API falhe
 
