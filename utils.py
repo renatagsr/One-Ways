@@ -7,8 +7,9 @@ import numpy as np
 import requests
 from google.cloud import bigquery
 from google.oauth2 import service_account
-import json # Adicione este import para lidar com JSON
-from streamlit.errors import StreamlitSecretNotFoundError # Importe o erro específico do Streamlit
+import json
+from streamlit.errors import StreamlitSecretNotFoundError
+import base64 # <<<<<<< IMPORTANTE: Adicione este import para Base64
 
 # --- 1. Configuração e Autenticação com o Google BigQuery ---
 
@@ -25,42 +26,47 @@ if os.path.exists(CREDENTIALS_PATH_LOCAL):
     try:
         credentials = service_account.Credentials.from_service_account_file(CREDENTIALS_PATH_LOCAL)
         project_id = credentials.project_id
-        #st.success("Credenciais carregadas do arquivo local para desenvolvimento.")
+        # st.info("DEBUG: Credenciais carregadas do arquivo local para desenvolvimento.") # Comentado para evitar poluir o app
     except Exception as e:
         st.error(f"Erro ao carregar credenciais do arquivo local '{CREDENTIALS_PATH_LOCAL}': {e}")
         st.error("Verifique se o arquivo JSON está válido e as permissões.")
         st.stop()
 else:
-    # 2. Se não encontrou o arquivo local, tentar carregar dos Streamlit Secrets
-    #    (para deploy no Streamlit Cloud ou para dev com secrets.toml)
+    # 2. Se não encontrou o arquivo local, tentar carregar dos Streamlit Secrets (Base64)
     try:
-        # Verifica se a chave está presente nos secrets
         if "GOOGLE_APPLICATION_CREDENTIALS" in st.secrets:
-            # Carrega a string JSON do secret e converte para dicionário
-            credentials_info = json.loads(st.secrets["GOOGLE_APPLICATION_CREDENTIALS"])
+            # Assume que o secret agora é uma string Base64 do JSON
+            base64_encoded_json = st.secrets["GOOGLE_APPLICATION_CREDENTIALS"]
+            
+            # <<<<<<< IMPORTANTE: Decodifica de Base64 para bytes, depois para string UTF-8
+            decoded_json_bytes = base64.b64decode(base64_encoded_json)
+            service_account_info_str = decoded_json_bytes.decode('utf-8')
+            
+            # Converte a string JSON para dicionário
+            credentials_info = json.loads(service_account_info_str)
+            
             credentials = service_account.Credentials.from_service_account_info(credentials_info)
-            project_id = credentials_info.get("project_id") # O project_id está dentro do JSON
-            st.success("Credenciais carregadas do Streamlit Secrets (ambiente de deploy).")
+            project_id = credentials_info.get("project_id")
+            # st.info("DEBUG: Credenciais carregadas e decodificadas de Base64 dos Streamlit Secrets (ambiente de deploy).") # Comentado
+            # st.info(f"DEBUG: Project ID carregado: {project_id}") # Comentado
         else:
             st.error("ERRO: Credenciais 'GOOGLE_APPLICATION_CREDENTIALS' não encontradas nos Streamlit Secrets.")
             st.error("Certifique-se de configurar GOOGLE_APPLICATION_CREDENTIALS na interface do Streamlit Cloud.")
             st.stop()
     except StreamlitSecretNotFoundError:
-        # Este erro acontece se não há nenhum arquivo secrets.toml/secret dir localmente.
-        # É esperado quando rodando localmente sem um secrets.toml e sem o arquivo local de credenciais.
         st.error(f"ERRO: Credenciais não carregadas. Nenhum arquivo secrets.toml encontrado localmente "
                  f"e o arquivo '{CREDENTIALS_PATH_LOCAL}' também não existe.")
         st.error("Para desenvolvimento local, coloque 'chave-de-servico.json' em 'credentials/'.")
-        st.error("Para deploy, configure 'GOOGLE_APPLICATION_CREDENTIALS' nos Secrets do Streamlit Cloud.")
+        st.error("Para deploy, configure 'GOOGLE_APPLICATION_CREDENTIALS' nos Secrets do Streamlit Cloud (agora como Base64).")
         st.stop()
     except Exception as e:
-        # Captura outros erros inesperados ao carregar de st.secrets
-        st.error(f"Erro inesperado ao carregar credenciais do Streamlit Secrets: {e}")
+        st.error(f"Erro inesperado ao carregar credenciais do Streamlit Secrets (possivelmente problema de Base64 ou JSON): {e}")
         st.stop()
 
 # Se chegamos até aqui e as credenciais foram carregadas com sucesso, podemos criar o cliente BigQuery.
 if credentials and project_id:
     client = bigquery.Client(credentials=credentials, project=project_id)
+    # st.info("DEBUG: Cliente BigQuery inicializado com sucesso.") # Comentado
 else:
     st.error("ERRO FATAL: Credenciais ou Project ID não foram carregados com sucesso. Verifique a configuração.")
     st.stop()
@@ -266,3 +272,4 @@ def load_data_for_period(start_date, end_date):
         df.loc[df['source'] == 'Admanager', 'total_receita'] *= usd_to_brl_rate
         
     return df
+
