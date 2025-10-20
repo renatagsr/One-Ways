@@ -11,7 +11,7 @@ from google.oauth2 import service_account
 # --- 1. Configuração e Autenticação com o Google BigQuery ---
 
 # 🚨 IMPORTANTE: SUBSTITUA ESTE CAMINHO PELO CAMINHO REAL DO SEU ARQUIVO JSON
-CREDENTIALS_PATH = 'credentials/chave-de-servico.json'
+GOOGLE_APPLICATION_CREDENTIALS = 'credentials/chave-de-servico.json'
 
 # Verifique se o arquivo de credenciais existe
 if not os.path.exists(CREDENTIALS_PATH):

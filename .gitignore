@@ -2,3 +2,4 @@ venv/
 # Python
 __pycache__/
 *.pyc
+credentials/
