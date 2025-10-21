@@ -89,10 +89,10 @@ def get_usd_to_brl_rate():
         rate = data['rates']['BRL']
         return rate
     except requests.exceptions.RequestException as e:
-        st.warning(f"Não foi possível obter a cotação USD-BRL da API: {e}. Usando cotação padrão: R\$ {DEFAULT_USD_BRL_RATE:,.2f}")
+        st.warning(f"Não foi possível obter a cotação USD-BRL da API: {e}. Usando cotação padrão: R$ {DEFAULT_USD_BRL_RATE:,.2f}")
         return DEFAULT_USD_BRL_RATE
     except (KeyError, TypeError) as e:
-        st.warning(f"Erro ao processar a resposta da API de cotação: {e}. Usando cotação padrão: R\$ {DEFAULT_USD_BRL_RATE:,.2f}")
+        st.warning(f"Erro ao processar a resposta da API de cotação: {e}. Usando cotação padrão: R$ {DEFAULT_USD_BRL_RATE:,.2f}")
         return DEFAULT_USD_BRL_RATE
 
 
@@ -107,7 +107,7 @@ def format_number(value, currency=False, percentage=False, decimal_places=0):
     if percentage:
         return f"{value:,.{decimal_places}f}%".replace(",", "X").replace(".", ",").replace("X", ".")
     if currency:
-        return f"R\${value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        return f"R${value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return f"{value:,.{decimal_places}f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def calculate_percentage_delta(current_value, previous_value):

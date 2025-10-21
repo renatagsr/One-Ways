@@ -11,11 +11,9 @@ from utils import (
 # --- Configuração da Página ---
 st.set_page_config(layout="wide", page_title="Dashboard de Mídia - Gerenciamento de Sites")
 
-st.title("🏢 Gerenciamento de Sites")
+st.title("Gerenciamento de Sites")
 
 # --- FILTROS NO CORPO DA PÁGINA ---
-# st.subheader("Filtros") # Removido para integrar no layout de colunas
-
 col_date_start, col_date_end, col_domain_filter = st.columns([1, 1, 2]) # Ajusta as larguras das colunas
 
 with col_date_start:
@@ -50,28 +48,68 @@ df_raw_current = load_data_for_period(start_date, end_date)
 df_raw_previous = load_data_for_period(prev_start_date, prev_end_date)
 
 # --- Filtro de Domínio (Agora na mesma linha das datas) ---
-available_domains = df_raw_current[
-    (df_raw_current['source'] == 'Admanager') & (df_raw_current['dominio'].notna())
-]['dominio'].unique()
-available_domains.sort()
-
 with col_domain_filter: # O filtro de domínio será renderizado nesta terceira coluna
-    st.markdown("### Filtrar por Domínio (Admanager)") # Título para a seção de domínio
+    st.write("Filtrar por Domínio (Admanager)") # Título para a seção de domínio
 
-    select_all_domains = st.checkbox("Selecionar Todos", value=True, key='checkbox_all_domains_site')
+    # Chaves únicas para os componentes nesta página
+    multiselect_key = 'ms_domains_site'
+    checkbox_key = 'cb_all_domains_site'
 
-    if select_all_domains:
-        default_selected_domains = list(available_domains)
-    else:
-        default_selected_domains = []
+    # Lista de domínios disponíveis (sempre como lista)
+    available_domains_list = list(df_raw_current[
+        (df_raw_current['source'] == 'Admanager') & (df_raw_current['dominio'].notna())
+    ]['dominio'].unique())
+    available_domains_list.sort() # Garante ordenação consistente
 
-    selected_domains = st.multiselect(
-        "Selecione os domínios:", # Label para acessibilidade, mas pode ser visualmente oculto
-        options=list(available_domains),
-        default=default_selected_domains,
-        key='multiselect_domains_site',
-        label_visibility="collapsed" # Oculta o label visual do multiselect, o markdown acima serve como título
+    # --- Lógica de Sincronização Checkbox <-> Multiselect usando Session State ---
+
+    # 1. Inicializa o estado do multiselect na session_state, se ainda não existir
+    if multiselect_key not in st.session_state:
+        st.session_state[multiselect_key] = available_domains_list # Por padrão, inicia com todos selecionados
+
+    # 2. Garante que os domínios selecionados ainda são válidos após uma mudança nos available_domains (ex: mudança de data)
+    current_selected_valid = [d for d in st.session_state[multiselect_key] if d in available_domains_list]
+    if set(current_selected_valid) != set(st.session_state[multiselect_key]):
+        st.session_state[multiselect_key] = current_selected_valid
+    
+    # 3. Define a função de callback para o checkbox
+    def on_checkbox_change_site():
+        if st.session_state[checkbox_key]:
+            st.session_state[multiselect_key] = available_domains_list
+        else:
+            st.session_state[multiselect_key] = []
+
+    # 4. Define a função de callback para o multiselect
+    def on_multiselect_change_site():
+        # Se todos os domínios disponíveis estão selecionados no multiselect, marca o checkbox
+        if set(st.session_state[multiselect_key]) == set(available_domains_list) and len(available_domains_list) > 0:
+            st.session_state[checkbox_key] = True
+        else:
+            st.session_state[checkbox_key] = False
+
+    # 5. Renderiza o checkbox
+    # O valor inicial do checkbox reflete se todos os domínios estão atualmente selecionados no multiselect
+    initial_checkbox_value = (set(st.session_state[multiselect_key]) == set(available_domains_list) and len(available_domains_list) > 0)
+    
+    select_all_domains_widget = st.checkbox(
+        "Selecionar Todos",
+        value=initial_checkbox_value, # Valor inicial baseado no estado do multiselect
+        key=checkbox_key, # Chave única para o checkbox
+        on_change=on_checkbox_change_site # Ativado quando o checkbox é clicado
     )
+
+    # 6. Renderiza o multiselect
+    # Seu valor é controlado diretamente por st.session_state[multiselect_key]
+    selected_domains = st.multiselect(
+        "Selecione os domínios:",
+        options=available_domains_list,
+        key=multiselect_key, # Chave única para o multiselect
+        label_visibility="collapsed",
+        on_change=on_multiselect_change_site # Ativado quando a seleção no multiselect muda
+    )
+    # Se não há domínios disponíveis, garante que selected_domains esteja vazio
+    if not available_domains_list:
+        selected_domains = []
 
 # Aplicar filtro de domínio aos DataFrames
 if selected_domains:
@@ -97,6 +135,10 @@ if df_data_current_filtered.empty and df_data_previous_filtered.empty:
 # Calcula todas as métricas para os períodos FILTRADOS (Visão Geral)
 current_metrics = calculate_business_metrics(df_data_current_filtered)
 previous_metrics = calculate_business_metrics(df_data_previous_filtered)
+
+# ... (Resto do código da página 2_Faturamento_Por_Site.py permanece o mesmo)
+# (Big Numbers, Estatísticas Admanager, Estatísticas Meta Ads, Tabela Detalhada)
+# ...
 
 # --- Big Numbers (Visão Geral) ---
 st.subheader("Visão Geral")

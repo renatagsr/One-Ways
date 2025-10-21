@@ -4,6 +4,8 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import datetime
+import numpy as np # Importar numpy se ainda não estiver
+
 from utils import (
     format_number, calculate_percentage_delta, calculate_business_metrics,
     load_data_for_period, TAXA_ADWORK_PERCENT
@@ -11,11 +13,9 @@ from utils import (
 
 st.set_page_config(layout="wide", page_title="Dashboard de Mídia - Visão Geral")
 
-st.title("📊 Dashboard de Performance de Mídia - Visão Geral")
+st.title("Dashboard de Performance de Mídia - Visão Geral")
 
 # --- FILTROS NO CORPO DA PÁGINA ---
-# st.subheader("Filtros") # Removido para integrar no layout de colunas
-
 col_date_start, col_date_end, col_domain_filter = st.columns([1, 1, 2]) # Ajusta as larguras das colunas para melhor visualização
 
 with col_date_start:
@@ -50,28 +50,68 @@ df_raw_current = load_data_for_period(start_date, end_date)
 df_raw_previous = load_data_for_period(prev_start_date, prev_end_date)
 
 # --- Filtro de Domínio (Agora na mesma linha das datas) ---
-available_domains = df_raw_current[
-    (df_raw_current['source'] == 'Admanager') & (df_raw_current['dominio'].notna())
-]['dominio'].unique()
-available_domains.sort()
-
 with col_domain_filter: # O filtro de domínio será renderizado nesta terceira coluna
-    st.markdown("### Filtrar por Domínio (Admanager)") # Título para a seção de domínio
+    st.write("Filtrar por Domínio (Admanager)") # Título para a seção de domínio
 
-    select_all_domains = st.checkbox("Selecionar Todos", value=True, key='checkbox_all_domains_overview')
+    # Chaves únicas para os componentes nesta página
+    multiselect_key = 'ms_domains_overview'
+    checkbox_key = 'cb_all_domains_overview'
 
-    if select_all_domains:
-        default_selected_domains = list(available_domains)
-    else:
-        default_selected_domains = []
+    # Lista de domínios disponíveis (sempre como lista)
+    available_domains_list = list(df_raw_current[
+        (df_raw_current['source'] == 'Admanager') & (df_raw_current['dominio'].notna())
+    ]['dominio'].unique())
+    available_domains_list.sort() # Garante ordenação consistente
 
-    selected_domains = st.multiselect(
-        "Selecione os domínios:", # Label para acessibilidade, mas pode ser visualmente oculto
-        options=list(available_domains),
-        default=default_selected_domains,
-        key='multiselect_domains_overview',
-        label_visibility="collapsed" # Oculta o label visual do multiselect, o markdown acima serve como título
+    # --- Lógica de Sincronização Checkbox <-> Multiselect usando Session State ---
+
+    # 1. Inicializa o estado do multiselect na session_state, se ainda não existir
+    if multiselect_key not in st.session_state:
+        st.session_state[multiselect_key] = available_domains_list # Por padrão, inicia com todos selecionados
+
+    # 2. Garante que os domínios selecionados ainda são válidos após uma mudança nos available_domains (ex: mudança de data)
+    current_selected_valid = [d for d in st.session_state[multiselect_key] if d in available_domains_list]
+    if set(current_selected_valid) != set(st.session_state[multiselect_key]):
+        st.session_state[multiselect_key] = current_selected_valid
+
+    # 3. Define a função de callback para o checkbox
+    def on_checkbox_change_overview():
+        if st.session_state[checkbox_key]:
+            st.session_state[multiselect_key] = available_domains_list
+        else:
+            st.session_state[multiselect_key] = []
+
+    # 4. Define a função de callback para o multiselect
+    def on_multiselect_change_overview():
+        # Se todos os domínios disponíveis estão selecionados no multiselect, marca o checkbox
+        if set(st.session_state[multiselect_key]) == set(available_domains_list) and len(available_domains_list) > 0:
+            st.session_state[checkbox_key] = True
+        else:
+            st.session_state[checkbox_key] = False
+
+    # 5. Renderiza o checkbox
+    # O valor inicial do checkbox reflete se todos os domínios estão atualmente selecionados no multiselect
+    initial_checkbox_value = (set(st.session_state[multiselect_key]) == set(available_domains_list) and len(available_domains_list) > 0)
+
+    select_all_domains_widget = st.checkbox(
+        "Selecionar Todos",
+        value=initial_checkbox_value, # Valor inicial baseado no estado do multiselect
+        key=checkbox_key, # Chave única para o checkbox
+        on_change=on_checkbox_change_overview # Ativado quando o checkbox é clicado
     )
+
+    # 6. Renderiza o multiselect
+    # Seu valor é controlado diretamente por st.session_state[multiselect_key]
+    selected_domains = st.multiselect(
+        "Selecione os domínios:",
+        options=available_domains_list,
+        key=multiselect_key, # Chave única para o multiselect
+        label_visibility="collapsed",
+        on_change=on_multiselect_change_overview # Ativado quando a seleção no multiselect muda
+    )
+    # Se não há domínios disponíveis, garante que selected_domains esteja vazio
+    if not available_domains_list:
+        selected_domains = []
 
 # Aplicar filtro de domínio aos DataFrames
 if selected_domains:
@@ -98,8 +138,9 @@ if df_data_current_filtered.empty and df_data_previous_filtered.empty:
 current_metrics = calculate_business_metrics(df_data_current_filtered)
 previous_metrics = calculate_business_metrics(df_data_previous_filtered)
 
-# --- Exibição dos Dados e Métricas ---
-st.subheader(f"Performance de {start_date.strftime('%d/%m/%Y')} a {end_date.strftime('%d/%m/%Y')}")
+# ... (Resto do código da página 1_Dashboard_Geral.py permanece o mesmo)
+# (Métrics, Gráficos, e Dados Brutos)
+# ...
 
 # Métricas de Mídia e Receita
 st.subheader("Métricas de Mídia e Receita")
@@ -233,20 +274,7 @@ fig_clicks.update_layout(
 st.plotly_chart(fig_clicks, use_container_width=True)
 
 # Gráfico de Pizza/Donut: Custo por Fonte (gráfico de pizza não tem grades tradicionais de eixo)
-st.subheader("Distribuição de Custo por Fonte")
-df_cost_by_source = df_data_current_filtered.groupby('source')['total_custo'].sum().reset_index()
-fig_cost_pie = px.pie(
-    df_cost_by_source,
-    values="total_custo",
-    names="source",
-    title="Custo Total por Fonte de Mídia",
-    hole=0.3,
-    labels={
-        "total_custo": "Custo",
-        "source": "Fonte de Mídia"
-    }
-)
-st.plotly_chart(fig_cost_pie, use_container_width=True)
+
 
 st.markdown("---")
 st.subheader("Dados Brutos (Período Atual)")
