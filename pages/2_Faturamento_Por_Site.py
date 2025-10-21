@@ -14,11 +14,11 @@ st.set_page_config(layout="wide", page_title="Dashboard de Mídia - Gerenciament
 st.title("🏢 Gerenciamento de Sites")
 
 # --- FILTROS NO CORPO DA PÁGINA ---
-st.subheader("Filtros")
+# st.subheader("Filtros") # Removido para integrar no layout de colunas
 
-col_date1, col_date2 = st.columns(2)
+col_date_start, col_date_end, col_domain_filter = st.columns([1, 1, 2]) # Ajusta as larguras das colunas
 
-with col_date1:
+with col_date_start:
     today = datetime.date.today()
     default_start_date = today - datetime.timedelta(days=30)
     start_date = st.date_input(
@@ -28,7 +28,7 @@ with col_date1:
         key='start_date_site'
     )
 
-with col_date2:
+with col_date_end:
     end_date = st.date_input(
         "Data de Fim:",
         value=today,
@@ -49,30 +49,28 @@ prev_end_date = end_date - datetime.timedelta(days=duration)
 df_raw_current = load_data_for_period(start_date, end_date)
 df_raw_previous = load_data_for_period(prev_start_date, prev_end_date)
 
-# --- Filtro de Domínio ---
+# --- Filtro de Domínio (Agora na mesma linha das datas) ---
 available_domains = df_raw_current[
     (df_raw_current['source'] == 'Admanager') & (df_raw_current['dominio'].notna())
 ]['dominio'].unique()
 available_domains.sort()
 
-st.write("### Filtrar por Domínio (Admanager)") # Subtítulo para os filtros de domínio
-col_domain_checkbox, col_domain_select = st.columns([0.3, 0.7]) # Ajusta as larguras das colunas
+with col_domain_filter: # O filtro de domínio será renderizado nesta terceira coluna
+    st.markdown("### Filtrar por Domínio (Admanager)") # Título para a seção de domínio
 
-with col_domain_checkbox:
     select_all_domains = st.checkbox("Selecionar Todos", value=True, key='checkbox_all_domains_site')
 
-with col_domain_select:
     if select_all_domains:
         default_selected_domains = list(available_domains)
     else:
         default_selected_domains = []
 
     selected_domains = st.multiselect(
-        "Selecione os domínios:",
+        "Selecione os domínios:", # Label para acessibilidade, mas pode ser visualmente oculto
         options=list(available_domains),
         default=default_selected_domains,
         key='multiselect_domains_site',
-        label_visibility="collapsed" # Oculta o label do multiselect pois já tem o checkbox
+        label_visibility="collapsed" # Oculta o label visual do multiselect, o markdown acima serve como título
     )
 
 # Aplicar filtro de domínio aos DataFrames
