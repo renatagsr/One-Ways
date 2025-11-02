@@ -122,10 +122,12 @@ def calculate_percentage_delta(current_value, previous_value):
         if current_val_num == 0:
             return 0.0 # Sem mudança (0 para 0)
         else:
-            return None # Não é possível calcular variação de 0 para um valor não-zero
+            # Evita divisão por zero quando o valor anterior é 0 e o atual não
+            return None # Indica delta indeterminado
     
     delta = ((current_val_num - previous_val_num) / previous_val_num) * 100
     return delta
+
 
 def calculate_business_metrics(df, default_taxa_adwork_percent=TAXA_ADWORK_PERCENT):
     """
@@ -189,6 +191,11 @@ def get_data_from_bigquery(query_sql):
             # Garante que a coluna 'data' seja do tipo datetime, essencial para Plotly e formatação
             if 'data' in df.columns:
                 df['data'] = pd.to_datetime(df['data'])
+            
+            # Garante que as novas colunas existam, mesmo que vazias, para evitar KeyError
+            for col in ['utm_campaign_norm', 'pais']:
+                if col not in df.columns:
+                    df[col] = None # Define como None, que será tratado como NaN pelo Pandas
         return df
     except Exception as e:
         st.error(f"Erro ao executar a consulta BigQuery: {e}")
@@ -199,77 +206,114 @@ def get_data_from_bigquery(query_sql):
 def load_data_for_period(start_date, end_date):
     """
     Carrega dados do BigQuery para o período especificado, unindo Meta Ads e Admanager.
+    Incorpora a lógica de UTM e domínio canônico fornecida pelo usuário.
     Converte receita do Admanager de USD para BRL.
-    Retorna o DataFrame completo (sem filtro de domínio ainda).
+    Retorna o DataFrame completo (sem filtro de domínio/utm/país ainda).
     """
-    meta_ads_table = f"`{project_id}.facebook_ads_data.campaign_insights`"
-    ad_manager_table = f"`{project_id}.ad_manager.admanager_universal`"
+    meta_ads_campaign_insights_table = f"`{project_id}.facebook_ads_data.campaign_insights`"
+    ad_manager_universal_table = f"`{project_id}.ad_manager.admanager_universal`"
+    ad_manager_utms_units_table = f"`{project_id}.ad_manager.admanager_utms_units`"
+
+    # Formata as datas para a consulta SQL
+    start_date_str = start_date.strftime('%Y-%m-%d')
+    end_date_str = end_date.strftime('%Y-%m-%d')
 
     query = f"""
-    SELECT
-        data,
-        source,
-        pais,
-        dominio,
-        SUM(total_impressoes) AS total_impressoes,
-        SUM(total_cliques) AS total_cliques,
-        SUM(total_custo) AS total_custo,
-        SUM(total_receita) AS total_receita, -- Este valor vem em USD
-        SUM(total_leads) AS total_leads,
-        SUM(total_mensagens) AS total_mensagens
-    FROM (
-        -- Consulta para Meta Ads
-        SELECT
-            Date AS data,
-            'Meta Ads' AS source,
-            NULL AS pais,
-            NULL AS dominio,
-            SUM(Impressions) AS total_impressoes,
-            SUM(Clicks) AS total_cliques,
-            SUM(Spend) AS total_custo,
-            NULL AS total_receita,
-            SUM(Leads) AS total_leads,
-            SUM(Messages) AS total_mensagens
-        FROM
-            {meta_ads_table}
-        WHERE
-            Date BETWEEN '{start_date.strftime('%Y-%m-%d')}' AND '{end_date.strftime('%Y-%m-%d')}'
-        GROUP BY
-            data
+    WITH agg AS (
+      SELECT
+        COALESCE(adx_ad_unit, ad_unit) AS ad_unit_key,
+        domain,
+        SUM(impressions) AS imp
+      FROM {ad_manager_universal_table}
+      WHERE domain IS NOT NULL AND domain <> ''
+        AND date BETWEEN '{start_date_str}' AND '{end_date_str}'
+      GROUP BY 1, 2
+    ),
+    ranked AS (
+      SELECT
+        ad_unit_key, domain, imp,
+        ROW_NUMBER() OVER (PARTITION BY ad_unit_key ORDER BY imp DESC) AS rn
+      FROM agg
+    ),
+    dim_adunit AS (
+      SELECT ad_unit_key, domain
+      FROM ranked
+      WHERE rn = 1
+    ),
 
-        UNION ALL
+    -- 2) UTM de campanha por domínio (derivado de ad_manager.admanager_utms_units)
+    utm_campaign_by_domain AS (
+      SELECT
+        u.date                                                 AS data,
+        LOWER(TRIM(COALESCE(u.utm_value, u.utm_value_api)))   AS utm_campaign_norm,
+        d.domain                                              AS dominio,
+        SUM(u.impressions) AS adm_imp,
+        SUM(u.clicks)      AS adm_clk,
+        SUM(u.revenue)     AS adm_rev
+      FROM {ad_manager_utms_units_table} u
+      LEFT JOIN dim_adunit d
+        ON d.ad_unit_key = COALESCE(u.adx_ad_unit, u.ad_unit)
+      WHERE u.date BETWEEN '{start_date_str}' AND '{end_date_str}'
+        AND u.utm_key = 'utm_campaign'
+      GROUP BY 1,2,3
+    ),
 
-        -- Consulta para Admanager
-        SELECT
-            date AS data,
-            'Admanager' AS source,
-            country AS pais,
-            domain AS dominio,
-            SUM(impressions) AS total_impressoes,
-            SUM(clicks) AS total_cliques,
-            NULL AS total_custo,
-            SUM(revenue) AS total_receita, -- Este valor vem em USD
-            NULL AS total_leads,
-            NULL AS total_mensagens
-        FROM
-            {ad_manager_table}
-        WHERE
-            date BETWEEN '{start_date.strftime('%Y-%m-%d')}' AND '{end_date.strftime('%Y-%m-%d')}'
-        GROUP BY
-            date, country, domain
+    -- 3) Bloco do Admanager (UTM) no shape final (como você já estava usando)
+    admanager_utm AS (
+      SELECT
+        CAST(u.date AS DATE)                    AS data,
+        CAST('Admanager (UTM)' AS STRING)       AS source,
+        CAST(NULL AS STRING)                    AS pais, -- Explicitamente NULL conforme a query fornecida
+        CAST(d.domain AS STRING)                AS dominio,
+        LOWER(TRIM(COALESCE(u.utm_value, u.utm_value_api))) AS utm_campaign_norm, -- Adicionado UTM da Admanager
+        CAST(SUM(u.impressions) AS INT64)       AS total_impressoes,
+        CAST(SUM(u.clicks) AS INT64)            AS total_cliques,
+        CAST(NULL AS FLOAT64)                   AS total_custo, -- Custo não é da Admanager aqui
+        CAST(SUM(u.revenue) AS FLOAT64)         AS total_receita,  -- USD (moeda da rede)
+        CAST(NULL AS INT64)                     AS total_leads,
+        CAST(NULL AS INT64)                     AS total_mensagens
+      FROM {ad_manager_utms_units_table} u
+      LEFT JOIN dim_adunit d
+        ON d.ad_unit_key = COALESCE(u.adx_ad_unit, u.ad_unit)
+      WHERE u.date BETWEEN '{start_date_str}' AND '{end_date_str}'
+      GROUP BY 1,2,3,4, utm_campaign_norm -- utm_campaign_norm adicionado ao GROUP BY
+    ),
+
+    -- 4) Meta Ads ligado por campanha à malha de domínios do Admanager
+    meta_ads_joined AS (
+      SELECT
+        CAST(m.Date AS DATE)                                       AS data,
+        CAST('Meta Ads' AS STRING)                                 AS source,
+        CAST(NULL AS STRING)                                       AS pais, -- Explicitamente NULL conforme a query fornecida
+        CAST(u.dominio AS STRING)                                  AS dominio,
+        LOWER(TRIM(m.Campaign_Name))                               AS utm_campaign_norm, -- UTM do Meta Ads
+        CAST(SUM(m.Impressions) AS INT64)                          AS total_impressoes,
+        CAST(SUM(m.Clicks) AS INT64)                               AS total_cliques,
+        CAST(SUM(m.Spend) AS FLOAT64)                              AS total_custo,
+        CAST(NULL AS FLOAT64)                                      AS total_receita, -- Receita não vem do Meta Ads neste join
+        CAST(SUM(m.Leads) AS INT64)                                AS total_leads,
+        CAST(SUM(m.Messages) AS INT64)                             AS total_mensagens
+      FROM {meta_ads_campaign_insights_table} m
+      LEFT JOIN utm_campaign_by_domain u
+        ON u.data = CAST(m.Date AS DATE)
+       AND u.utm_campaign_norm = LOWER(TRIM(m.Campaign_Name))
+      WHERE m.Date BETWEEN '{start_date_str}' AND '{end_date_str}'
+      GROUP BY 1,2,3,4, utm_campaign_norm
     )
-    GROUP BY
-        data, source, pais, dominio
-    ORDER BY
-        data, source, pais, dominio
+
+    -- 5) UNION das duas fontes, já padronizadas
+    SELECT * FROM meta_ads_joined
+    UNION ALL
+    SELECT * FROM admanager_utm
+    ORDER BY data, source, pais, dominio, utm_campaign_norm
     """
     df = get_data_from_bigquery(query)
 
     if not df.empty:
         usd_to_brl_rate = get_usd_to_brl_rate()
         
+        # Converte a receita que vem do Admanager (agora marcado como source 'Admanager (UTM)')
         df['total_receita'] = pd.to_numeric(df['total_receita'], errors='coerce').fillna(0)
-        df.loc[df['source'] == 'Admanager', 'total_receita'] *= usd_to_brl_rate
+        df.loc[df['source'] == 'Admanager (UTM)', 'total_receita'] *= usd_to_brl_rate
         
     return df
-

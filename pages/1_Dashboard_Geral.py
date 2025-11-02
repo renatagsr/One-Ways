@@ -59,7 +59,7 @@ with col_domain_filter: # O filtro de domínio será renderizado nesta terceira 
 
     # Lista de domínios disponíveis (sempre como lista)
     available_domains_list = list(df_raw_current[
-        (df_raw_current['source'] == 'Admanager') & (df_raw_current['dominio'].notna())
+        (df_raw_current['source'] == 'Admanager (UTM)') & (df_raw_current['dominio'].notna())
     ]['dominio'].unique())
     available_domains_list.sort() # Garante ordenação consistente
 
