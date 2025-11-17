@@ -14,7 +14,7 @@ st.set_page_config(layout="wide", page_title="Dashboard de Mídia - Gerenciament
 st.title("Gerenciamento de Sites")
 
 # --- FILTROS NO CORPO DA PÁGINA ---
-col_date_start, col_date_end, col_domain_filter = st.columns([1, 1, 2]) # Ajusta as larguras das colunas
+col_date_start, col_date_end, col_domain_filter, col_network_code_filter = st.columns([1, 1, 1.5, 1.5])
 
 with col_date_start:
     today = datetime.date.today()
@@ -48,101 +48,159 @@ df_raw_current = load_data_for_period(start_date, end_date)
 df_raw_previous = load_data_for_period(prev_start_date, prev_end_date)
 
 # --- Filtro de Domínio (Agora na mesma linha das datas) ---
-with col_domain_filter: # O filtro de domínio será renderizado nesta terceira coluna
-    st.write("Filtrar por Domínio (Admanager)") # Título para a seção de domínio
+with col_domain_filter:
+    st.write("Filtrar por Domínio (Admanager)")
 
-    # Chaves únicas para os componentes nesta página
     multiselect_key = 'ms_domains_site'
     checkbox_key = 'cb_all_domains_site'
 
-    # Lista de domínios disponíveis (sempre como lista)
     available_domains_list = list(df_raw_current[
-        (df_raw_current['source'] == 'Admanager (UTM)') & (df_raw_current['dominio'].notna())
+        (df_raw_current['source'] == 'Admanager (UTM)') | (df_raw_current['source'] == 'Admanager (UTM) & Meta Ads') & (df_raw_current['dominio'].notna())
     ]['dominio'].unique())
-    available_domains_list.sort() # Garante ordenação consistente
+    available_domains_list.sort()
 
-    # --- Lógica de Sincronização Checkbox <-> Multiselect usando Session State ---
-
-    # 1. Inicializa o estado do multiselect na session_state, se ainda não existir
     if multiselect_key not in st.session_state:
-        st.session_state[multiselect_key] = available_domains_list # Por padrão, inicia com todos selecionados
+        st.session_state[multiselect_key] = available_domains_list
 
-    # 2. Garante que os domínios selecionados ainda são válidos após uma mudança nos available_domains (ex: mudança de data)
     current_selected_valid = [d for d in st.session_state[multiselect_key] if d in available_domains_list]
     if set(current_selected_valid) != set(st.session_state[multiselect_key]):
         st.session_state[multiselect_key] = current_selected_valid
     
-    # 3. Define a função de callback para o checkbox
     def on_checkbox_change_site():
         if st.session_state[checkbox_key]:
             st.session_state[multiselect_key] = available_domains_list
         else:
             st.session_state[multiselect_key] = []
 
-    # 4. Define a função de callback para o multiselect
+    initial_checkbox_value = (set(st.session_state[multiselect_key]) == set(available_domains_list) and len(available_domains_list) > 0)
+    
+    st.checkbox(
+        "Selecionar Todos",
+        value=initial_checkbox_value,
+        key=checkbox_key,
+        on_change=on_checkbox_change_site
+    )
+
     def on_multiselect_change_site():
-        # Se todos os domínios disponíveis estão selecionados no multiselect, marca o checkbox
         if set(st.session_state[multiselect_key]) == set(available_domains_list) and len(available_domains_list) > 0:
             st.session_state[checkbox_key] = True
         else:
             st.session_state[checkbox_key] = False
 
-    # 5. Renderiza o checkbox
-    # O valor inicial do checkbox reflete se todos os domínios estão atualmente selecionados no multiselect
-    initial_checkbox_value = (set(st.session_state[multiselect_key]) == set(available_domains_list) and len(available_domains_list) > 0)
-    
-    select_all_domains_widget = st.checkbox(
-        "Selecionar Todos",
-        value=initial_checkbox_value, # Valor inicial baseado no estado do multiselect
-        key=checkbox_key, # Chave única para o checkbox
-        on_change=on_checkbox_change_site # Ativado quando o checkbox é clicado
-    )
-
-    # 6. Renderiza o multiselect
-    # Seu valor é controlado diretamente por st.session_state[multiselect_key]
     selected_domains = st.multiselect(
         "Selecione os domínios:",
         options=available_domains_list,
-        key=multiselect_key, # Chave única para o multiselect
+        key=multiselect_key,
         label_visibility="collapsed",
-        on_change=on_multiselect_change_site # Ativado quando a seleção no multiselect muda
+        on_change=on_multiselect_change_site
     )
-    # Se não há domínios disponíveis, garante que selected_domains esteja vazio
     if not available_domains_list:
         selected_domains = []
 
-# Aplicar filtro de domínio aos DataFrames
-if selected_domains:
-    df_data_current_filtered = df_raw_current[
-        (df_raw_current['dominio'].isin(selected_domains)) |
-        (df_raw_current['source'] != 'Admanager')
-    ].copy()
-    df_data_previous_filtered = df_raw_previous[
-        (df_raw_previous['dominio'].isin(selected_domains)) |
-        (df_raw_previous['source'] != 'Admanager')
-    ].copy()
-else:
-    st.warning("Nenhum domínio do Admanager selecionado. Exibindo apenas dados de outras fontes.")
-    df_data_current_filtered = df_raw_current[df_raw_current['source'] != 'Admanager'].copy()
-    df_data_previous_filtered = df_raw_previous[df_raw_previous['source'] != 'Admanager'].copy()
+# Adição do filtro de Network Code
+with col_network_code_filter:
+    st.write("Filtrar por Network Code (Admanager)")
 
-st.markdown("--- ") # Separador para o conteúdo principal
+    multiselect_key_nc = 'ms_network_code_site'
+    checkbox_key_nc = 'cb_all_network_code_site'
+
+    available_network_codes_list = list(df_raw_current[
+        ((df_raw_current['source'] == 'Admanager (UTM)') | (df_raw_current['source'] == 'Admanager (UTM) & Meta Ads')) & (df_raw_current['network_code'].notna())
+    ]['network_code'].unique())
+    available_network_codes_list.sort()
+
+    if multiselect_key_nc not in st.session_state:
+        st.session_state[multiselect_key_nc] = available_network_codes_list
+
+    current_selected_valid_nc = [nc for nc in st.session_state[multiselect_key_nc] if nc in available_network_codes_list]
+    if set(current_selected_valid_nc) != set(st.session_state[multiselect_key_nc]):
+        st.session_state[multiselect_key_nc] = current_selected_valid_nc
+
+    def on_checkbox_change_network_code_site():
+        if st.session_state[checkbox_key_nc]:
+            st.session_state[multiselect_key_nc] = available_network_codes_list
+        else:
+            st.session_state[multiselect_key_nc] = []
+
+    def on_multiselect_change_network_code_site():
+        if set(st.session_state[multiselect_key_nc]) == set(available_network_codes_list) and len(available_network_codes_list) > 0:
+            st.session_state[checkbox_key_nc] = True
+        else:
+            st.session_state[checkbox_key_nc] = False
+
+    initial_checkbox_value_nc = (set(st.session_state[multiselect_key_nc]) == set(available_network_codes_list) and len(available_network_codes_list) > 0)
+
+    st.checkbox(
+        "Selecionar Todos",
+        value=initial_checkbox_value_nc,
+        key=checkbox_key_nc,
+        on_change=on_checkbox_change_network_code_site
+    )
+
+    selected_network_codes = st.multiselect(
+        "Selecione os Network Codes:",
+        options=available_network_codes_list,
+        key=multiselect_key_nc,
+        label_visibility="collapsed",
+        on_change=on_multiselect_change_network_code_site
+    )
+    if not available_network_codes_list:
+        selected_network_codes = []
+
+# Lógica de aplicação dos filtros
+df_data_current_filtered = df_raw_current.copy()
+df_data_previous_filtered = df_raw_previous.copy()
+
+is_admanager_current = (df_data_current_filtered['source'] == 'Admanager (UTM)') | (df_data_current_filtered['source'] == 'Admanager (UTM) & Meta Ads')
+is_admanager_previous = (df_data_previous_filtered['source'] == 'Admanager (UTM)') | (df_data_previous_filtered['source'] == 'Admanager (UTM) & Meta Ads')
+
+if selected_domains:
+    domain_filter_current = df_data_current_filtered['dominio'].isin(selected_domains)
+    domain_filter_previous = df_data_previous_filtered['dominio'].isin(selected_domains)
+    is_admanager_current = is_admanager_current & domain_filter_current
+    is_admanager_previous = is_admanager_previous & domain_filter_previous
+else:
+    st.warning("Nenhum domínio do Admanager selecionado. Os dados de Admanager (UTM) e combinados não serão exibidos.")
+    is_admanager_current = False
+    is_admanager_previous = False
+
+if selected_network_codes:
+    network_filter_current = df_data_current_filtered['network_code'].isin(selected_network_codes)
+    network_filter_previous = df_data_previous_filtered['network_code'].isin(selected_network_codes)
+    is_admanager_current = is_admanager_current & network_filter_current
+    is_admanager_previous = is_admanager_previous & network_filter_previous
+else:
+    if selected_domains:
+         st.warning("Nenhum Network Code do Admanager selecionado. Os dados de Admanager (UTM) e combinados não serão exibidos.")
+    is_admanager_current = False
+    is_admanager_previous = False
+
+df_data_current_filtered = df_data_current_filtered[
+    (~ ((df_data_current_filtered['source'] == 'Admanager (UTM)') | (df_data_current_filtered['source'] == 'Admanager (UTM) & Meta Ads'))) | is_admanager_current
+].copy()
+df_data_previous_filtered = df_data_previous_filtered[
+    (~ ((df_data_previous_filtered['source'] == 'Admanager (UTM)') | (df_data_previous_filtered['source'] == 'Admanager (UTM) & Meta Ads'))) | is_admanager_previous
+].copy()
+
+
+st.markdown("--- ")
 
 if df_data_current_filtered.empty and df_data_previous_filtered.empty:
     st.warning("Nenhum dado encontrado para o período selecionado e/ou domínios filtrados. Ajuste os filtros ou verifique as fontes de dados.")
     st.stop()
 
-# Calcula todas as métricas para os períodos FILTRADOS (Visão Geral)
 current_metrics = calculate_business_metrics(df_data_current_filtered)
 previous_metrics = calculate_business_metrics(df_data_previous_filtered)
 
-# ... (Resto do código da página 2_Faturamento_Por_Site.py permanece o mesmo)
-# (Big Numbers, Estatísticas Admanager, Estatísticas Meta Ads, Tabela Detalhada)
-# ...
+usd_to_brl_rate = get_usd_to_brl_rate()
+
+current_total_revenue_usd = current_metrics['total_receita'] / usd_to_brl_rate if usd_to_brl_rate != 0 else 0
+previous_total_revenue_usd = previous_metrics['total_receita'] / usd_to_brl_rate if usd_to_brl_rate != 0 else 0
+
 
 # --- Big Numbers (Visão Geral) ---
-st.subheader("Visão Geral")
-col_nl, col_roi, col_roas, col_taxa = st.columns(4)
+st.subheader("Métricas Gerais do Período")
+col_nl, col_roi, col_roas, col_receita_usd, col_receita_brl = st.columns(5)
 
 with col_nl:
     delta = calculate_percentage_delta(current_metrics['lucro_liquido'], previous_metrics['lucro_liquido'])
@@ -164,17 +222,25 @@ with col_roas:
     delta = calculate_percentage_delta(current_metrics['roas'], previous_metrics['roas'])
     st.metric(
         label="ROAS",
-        value=format_number(current_metrics['roas'], percentage=True, decimal_places=2),
+        value=format_number(current_metrics['roas'], decimal_places=2),
+        delta=f"{delta:,.2f}" if delta is not None else None,
+        delta_color="normal"
+    )
+with col_receita_usd:
+    delta = calculate_percentage_delta(current_total_revenue_usd, previous_total_revenue_usd)
+    st.metric(
+        label="Receita Total (USD)",
+        value=f"${current_total_revenue_usd:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
         delta=f"{delta:,.2f}%" if delta is not None else None,
         delta_color="normal"
     )
-with col_taxa:
-    delta = calculate_percentage_delta(current_metrics['custo_taxa_adwork'], previous_metrics['custo_taxa_adwork'])
+with col_receita_brl:
+    delta = calculate_percentage_delta(current_metrics['total_receita'], previous_metrics['total_receita'])
     st.metric(
-        label="Custo da Taxa de Adwork",
-        value=format_number(current_metrics['custo_taxa_adwork'], currency=True),
+        label="Receita Total (BRL)",
+        value=format_number(current_metrics['total_receita'], currency=True),
         delta=f"{delta:,.2f}%" if delta is not None else None,
-        delta_color="inverse"
+        delta_color="normal"
     )
 
 st.markdown("---")
@@ -182,29 +248,26 @@ st.markdown("---")
 # --- ESTATÍSTICAS ADMANAGER ---
 st.subheader("Estatísticas Admanager")
 
-# Filtrar apenas os dados do Admanager para o período atual
-df_admanager_current = df_data_current_filtered[df_data_current_filtered['source'] == 'Admanager'].copy()
-df_admanager_previous = df_data_previous_filtered[df_data_previous_filtered['source'] == 'Admanager'].copy()
+df_admanager_current = df_data_current_filtered[
+    (df_data_current_filtered['source'].str.contains('Admanager')) &
+    (df_data_current_filtered['dominio'].notna())
+].copy()
+df_admanager_previous = df_data_previous_filtered[
+    (df_data_previous_filtered['source'].str.contains('Admanager')) &
+    (df_data_previous_filtered['dominio'].notna())
+].copy()
 
-# Obter a cotação USD-BRL (a função já é cacheada e lida com erros)
-usd_to_brl_rate = get_usd_to_brl_rate()
-
-# Calcular métricas do Admanager para o período atual
-admanager_current_revenue_brl = df_admanager_current['total_receita'].sum() # Já está em BRL
+admanager_current_revenue_brl = df_admanager_current['total_receita'].sum()
 admanager_current_impressions = df_admanager_current['total_impressoes'].sum()
 admanager_current_clicks = df_admanager_current['total_cliques'].sum()
 
-# Calcular métricas do Admanager para o período anterior
 admanager_previous_revenue_brl = df_admanager_previous['total_receita'].sum()
 admanager_previous_impressions = df_admanager_previous['total_impressoes'].sum()
 admanager_previous_clicks = df_admanager_previous['total_cliques'].sum()
 
-# Ganhos em Dólar (calculado a partir dos ganhos em BRL e da cotação)
-# Se a cotação for 0 ou N/A, tratamos para evitar divisão por zero
 admanager_current_revenue_usd = admanager_current_revenue_brl / usd_to_brl_rate if usd_to_brl_rate else 0
 admanager_previous_revenue_usd = admanager_previous_revenue_brl / usd_to_brl_rate if usd_to_brl_rate else 0
 
-# eCPM = (Ganhos em Dólar / Impressões) * 1000
 admanager_current_ecpm = (admanager_current_revenue_usd / admanager_current_impressions * 1000) if admanager_current_impressions else 0
 admanager_previous_ecpm = (admanager_previous_revenue_usd / admanager_previous_impressions * 1000) if admanager_previous_impressions else 0
 
@@ -213,7 +276,6 @@ col_usd, col_brl, col_imp, col_ecpm, col_cli = st.columns(5)
 
 with col_usd:
     delta = calculate_percentage_delta(admanager_current_revenue_usd, admanager_previous_revenue_usd)
-    # Formatação manual para dólar, usando a lógica de troca de separadores.
     st.metric(
         label="Ganhos (USD)",
         value=f"${admanager_current_revenue_usd:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
@@ -240,7 +302,7 @@ with col_ecpm:
     delta = calculate_percentage_delta(admanager_current_ecpm, admanager_previous_ecpm)
     st.metric(
         label="eCPM (USD)",
-        value=f"${admanager_current_ecpm:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."), # Formatação manual para dólar
+        value=f"${admanager_current_ecpm:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
         delta=f"{delta:,.2f}%" if delta is not None else None,
         delta_color="normal"
     )
@@ -258,23 +320,19 @@ st.markdown("---")
 # --- ESTATÍSTICAS META ADS ---
 st.subheader("Estatísticas Meta Ads")
 
-# Filtrar apenas os dados do Meta Ads para o período atual e anterior
 df_meta_ads_current = df_data_current_filtered[df_data_current_filtered['source'] == 'Meta Ads'].copy()
 df_meta_ads_previous = df_data_previous_filtered[df_data_previous_filtered['source'] == 'Meta Ads'].copy()
 
-# Calcular métricas do Meta Ads para o período atual
 meta_ads_current_cost = df_meta_ads_current['total_custo'].sum()
-meta_ads_current_leads = df_meta_ads_current['total_leads'].sum()
+meta_ads_current_leads = df_meta_ads_current['total_leads'].sum() + df_meta_ads_current['total_mensagens'].sum()
 meta_ads_current_impressions = df_meta_ads_current['total_impressoes'].sum()
 meta_ads_current_clicks = df_meta_ads_current['total_cliques'].sum()
 
-# Calcular métricas do Meta Ads para o período anterior
 meta_ads_previous_cost = df_meta_ads_previous['total_custo'].sum()
-meta_ads_previous_leads = df_meta_ads_previous['total_leads'].sum()
+meta_ads_previous_leads = df_meta_ads_previous['total_leads'].sum() + df_meta_ads_previous['total_mensagens'].sum()
 meta_ads_previous_impressions = df_meta_ads_previous['total_impressoes'].sum()
 meta_ads_previous_clicks = df_meta_ads_previous['total_cliques'].sum()
 
-# Calcular métricas derivadas, com tratamento de divisão por zero
 meta_ads_current_cpl = meta_ads_current_cost / meta_ads_current_leads if meta_ads_current_leads else 0
 meta_ads_current_ctr = (meta_ads_current_clicks / meta_ads_current_impressions * 100) if meta_ads_current_impressions else 0
 meta_ads_current_cpm = (meta_ads_current_cost / meta_ads_current_impressions * 1000) if meta_ads_current_impressions else 0
@@ -287,7 +345,7 @@ meta_ads_previous_cpc = meta_ads_previous_cost / meta_ads_previous_clicks if met
 
 
 col_gasto, col_leads, col_cpl, col_imp_meta, col_cli_meta = st.columns(5)
-col_ctr, col_cpm, col_cpc = st.columns(3) # Segunda linha para as demais métricas
+col_ctr, col_cpm, col_cpc = st.columns(3)
 
 with col_gasto:
     delta = calculate_percentage_delta(meta_ads_current_cost, meta_ads_previous_cost)
@@ -300,7 +358,7 @@ with col_gasto:
 with col_leads:
     delta = calculate_percentage_delta(meta_ads_current_leads, meta_ads_previous_leads)
     st.metric(
-        label="Leads",
+        label="Leads + Mensagens",
         value=format_number(meta_ads_current_leads),
         delta=f"{delta:,.2f}%" if delta is not None else None,
         delta_color="normal"
@@ -308,7 +366,7 @@ with col_leads:
 with col_cpl:
     delta = calculate_percentage_delta(meta_ads_current_cpl, meta_ads_previous_cpl)
     st.metric(
-        label="CPL",
+        label="CPL (Leads+Msg)",
         value=format_number(meta_ads_current_cpl, currency=True),
         delta=f"{delta:,.2f}%" if delta is not None else None,
         delta_color="inverse"
@@ -361,7 +419,7 @@ st.markdown("---")
 st.subheader("Visão Detalhada por Site")
 
 df_admanager_domains = df_data_current_filtered[
-    (df_data_current_filtered['source'] == 'Admanager') & (df_data_current_filtered['dominio'].notna())
+    (df_data_current_filtered['source'].str.contains('Admanager')) & (df_data_current_filtered['dominio'].notna())
 ].copy()
 
 if not df_admanager_domains.empty:
@@ -424,9 +482,9 @@ if not df_admanager_domains.empty:
         if isinstance(val, str) and ("Inf" in val or "N/A" in val):
             return ''
         
-        clean_val = val.replace('R$', '').replace('%', '').replace('.', '').replace(',', '.') if is_currency else val
+        clean_val = val.replace('R$', '').replace('.', '').replace(',', '.') if is_currency else val
         try:
-            num_val = float(clean_val)
+            num_val = float(clean_val.replace('%', ''))
         except (ValueError, TypeError):
             return ''
         
@@ -454,4 +512,140 @@ else:
 
 st.markdown("---")
 st.subheader("Dados Brutos (Período Atual)")
-st.dataframe(df_data_current_filtered)
+
+if not df_data_current_filtered.empty:
+    df_display_raw = df_data_current_filtered.copy()
+
+    # --- Pre-processing for calculations ---
+    # Garante que as colunas numéricas são float e trata NaNs para cálculo
+    numeric_for_calc_cols = ['total_receita', 'total_custo', 'total_impressoes', 'total_cliques', 'total_leads', 'total_mensagens']
+    for col in numeric_for_calc_cols:
+        if col in df_display_raw.columns:
+            df_display_raw[col] = pd.to_numeric(df_display_raw[col], errors='coerce').fillna(0)
+        else:
+            df_display_raw[col] = 0.0 # Garante que a coluna exista com 0 se estiver faltando
+
+    # Calcula lucro e ROI por linha ANTES de dropar/renomear colunas
+    df_display_raw['custo_taxa_adwork'] = df_display_raw['total_receita'] * TAXA_ADWORK_PERCENT
+    df_display_raw['lucro_liquido'] = df_display_raw['total_receita'] - df_display_raw['total_custo'] - df_display_raw['custo_taxa_adwork']
+    
+    def calculate_roi_for_raw_row(row):
+        receita = row['total_receita']
+        custo = row['total_custo']
+        if custo == 0:
+            return 0 if receita == 0 else np.inf # Usar np.inf para valores infinitos
+        return ((receita - custo) / custo) * 100
+    df_display_raw['roi'] = df_display_raw.apply(calculate_roi_for_raw_row, axis=1)
+
+    # 1. Retirar a coluna de source (a original que indica 'Admanager (UTM)', 'Meta Ads')
+    if 'source' in df_display_raw.columns:
+        df_display_raw = df_display_raw.drop(columns=['source'])
+
+    # 2. Combinar 'total_leads' e 'total_mensagens' em uma coluna só
+    combined_leads_messages = pd.Series([0.0] * len(df_display_raw), index=df_display_raw.index)
+    if 'total_leads' in df_display_raw.columns:
+        combined_leads_messages += df_display_raw['total_leads']
+    if 'total_mensagens' in df_display_raw.columns:
+        combined_leads_messages += df_display_raw['total_mensagens']
+    df_display_raw['Leads + Mensagens'] = combined_leads_messages
+
+    # Dropar as colunas originais de leads e mensagens e a coluna auxiliar de custo de taxa
+    cols_to_drop_if_exist = ['total_leads', 'total_mensagens', 'custo_taxa_adwork']
+    df_display_raw = df_display_raw.drop(columns=[col for col in cols_to_drop_if_exist if col in df_display_raw.columns])
+
+    # 3. Renomear colunas: remover "total_" e simplificar UTMs
+    column_renames = {}
+    for col in df_display_raw.columns:
+        if col.startswith('total_'):
+            column_renames[col] = col.replace('total_', '')
+        elif col.startswith('utm_'):
+            if col == 'utm_campaign_norm':
+                column_renames[col] = 'Campaign' # Nome mais simples
+            elif col == 'utm_source':
+                column_renames[col] = 'Source' # Nome mais simples
+            # Outras colunas utm_ serão descartadas por não estarem na ordem final
+    df_display_raw = df_display_raw.rename(columns=column_renames)
+
+    # 4. Reordenar colunas
+    prefix_cols = ['data', 'pais', 'dominio']
+    network_code_col = 'network_code'
+    
+    # UTMs atualizadas (apenas Campaign e Source)
+    utm_cols_display_names = ['Campaign', 'Source']
+    
+    # Novas métricas incluindo lucro e ROI
+    metric_cols_display_names = [
+        'custo', 'receita', 'lucro_liquido', 'roi', # Usando as renomeadas e recém-calculadas
+        'impressoes', 'cliques', 'Leads + Mensagens' # Usando as renomeadas/combinadas
+    ]
+
+    final_column_order = []
+    for col in prefix_cols:
+        if col in df_display_raw.columns:
+            final_column_order.append(col)
+
+    if network_code_col in df_display_raw.columns:
+        final_column_order.append(network_code_col)
+    
+    for col in utm_cols_display_names:
+        if col in df_display_raw.columns:
+            final_column_order.append(col)
+            
+    # Inserir Lucro Líquido e ROI na ordem desejada
+    if 'lucro_liquido' in df_display_raw.columns:
+        final_column_order.append('lucro_liquido')
+    if 'roi' in df_display_raw.columns:
+        final_column_order.append('roi')
+
+    # Adicionar as demais colunas de métricas
+    for col in [m for m in metric_cols_display_names if m not in ['lucro_liquido', 'roi']]: # Evitar duplicidade
+        if col in df_display_raw.columns:
+            final_column_order.append(col)
+
+    # Filtrar para garantir que apenas colunas existentes no DataFrame estejam na ordem final
+    final_column_order_filtered = [col for col in final_column_order if col in df_display_raw.columns]
+    df_display_raw = df_display_raw[final_column_order_filtered]
+
+    # --- Styling (Heatmap e Formatação) ---
+    columns_to_heatmap = [
+        'custo', 'receita', 'lucro_liquido', 'roi',
+        'impressoes', 'cliques', 'Leads + Mensagens'
+    ]
+    columns_to_heatmap_filtered = [col for col in columns_to_heatmap if col in df_display_raw.columns]
+
+    # Preparar DataFrame para styling (garantindo que os valores são numéricos para o gradient)
+    df_numeric_for_styling = df_display_raw.copy()
+    for col in columns_to_heatmap_filtered:
+        df_numeric_for_styling[col] = pd.to_numeric(df_numeric_for_styling[col], errors='coerce')
+        # Substituir inf por NaN para que não sejam coloridos e não distorçam a escala do gradient
+        df_numeric_for_styling[col] = df_numeric_for_styling[col].replace([np.inf, -np.inf], np.nan) 
+    
+    styled_df = df_numeric_for_styling.style
+
+    # Definir opções de formatação para cada coluna
+    cols_to_format_dict = {
+        'custo': {'currency': True},
+        'receita': {'currency': True},
+        'lucro_liquido': {'currency': True},
+        'roi': {'percentage': True, 'decimal_places': 2},
+        'impressoes': {'decimal_places': 0},
+        'cliques': {'decimal_places': 0},
+        'Leads + Mensagens': {'decimal_places': 0}
+    }
+
+    for col in columns_to_heatmap_filtered:
+        # Aplicar background_gradient para as colunas numéricas válidas
+        # Evitar aplicar gradient se todos os valores forem NaN ou iguais
+        min_val = df_numeric_for_styling[col].min()
+        max_val = df_numeric_for_styling[col].max()
+        if pd.notna(min_val) and pd.notna(max_val) and min_val != max_val:
+            styled_df = styled_df.background_gradient(cmap='YlGn', subset=[col])
+        
+        # Aplicar formatação usando a função format_number
+        format_options = cols_to_format_dict.get(col, {})
+        # Usamos uma lambda para aplicar format_number mantendo os argumentos
+        styled_df = styled_df.format({col: lambda x, opts=format_options: format_number(x, **opts)})
+
+    st.dataframe(styled_df, hide_index=True, use_container_width=True)
+else:
+    st.info("Nenhum dado bruto encontrado para o período atual após a filtragem.")

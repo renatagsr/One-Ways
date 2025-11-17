@@ -9,12 +9,12 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 import json
 from streamlit.errors import StreamlitSecretNotFoundError
-import base64 # <<<<<<< IMPORTANTE: Adicione este import para Base64
+import base64
 
 # --- 1. Configuração e Autenticação com o Google BigQuery ---
 
 credentials = None
-project_id = None
+project_id = "dashboard-474222" # Definido explicitamente com base nas tabelas fornecidas
 
 # Caminho para o arquivo de credenciais local (para desenvolvimento)
 CREDENTIALS_PATH_LOCAL = 'credentials/chave-de-servico.json'
@@ -25,8 +25,10 @@ CREDENTIALS_PATH_LOCAL = 'credentials/chave-de-servico.json'
 if os.path.exists(CREDENTIALS_PATH_LOCAL):
     try:
         credentials = service_account.Credentials.from_service_account_file(CREDENTIALS_PATH_LOCAL)
-        project_id = credentials.project_id
-        # st.info("DEBUG: Credenciais carregadas do arquivo local para desenvolvimento.") # Comentado para evitar poluir o app
+        if credentials.project_id != project_id:
+             st.warning(f"O project_id nas credenciais locais ({credentials.project_id}) difere do project_id esperado ({project_id}). Usando o project_id das credenciais.")
+             project_id = credentials.project_id
+        # st.info("DEBUG: Credenciais carregadas do arquivo local para desenvolvimento.")
     except Exception as e:
         st.error(f"Erro ao carregar credenciais do arquivo local '{CREDENTIALS_PATH_LOCAL}': {e}")
         st.error("Verifique se o arquivo JSON está válido e as permissões.")
@@ -35,27 +37,23 @@ else:
     # 2. Se não encontrou o arquivo local, tentar carregar dos Streamlit Secrets (Base64)
     try:
         if "GOOGLE_APPLICATION_CREDENTIALS" in st.secrets:
-            # Assume que o secret agora é uma string Base64 do JSON
             base64_encoded_json = st.secrets["GOOGLE_APPLICATION_CREDENTIALS"]
-            
-            # <<<<<<< IMPORTANTE: Decodifica de Base64 para bytes, depois para string UTF-8
             decoded_json_bytes = base64.b64decode(base64_encoded_json)
             service_account_info_str = decoded_json_bytes.decode('utf-8')
-            
-            # Converte a string JSON para dicionário
             credentials_info = json.loads(service_account_info_str)
             
             credentials = service_account.Credentials.from_service_account_info(credentials_info)
-            project_id = credentials_info.get("project_id")
-            # st.info("DEBUG: Credenciais carregadas e decodificadas de Base64 dos Streamlit Secrets (ambiente de deploy).") # Comentado
-            # st.info(f"DEBUG: Project ID carregado: {project_id}") # Comentado
+            if credentials_info.get("project_id") != project_id:
+                st.warning(f"O project_id nas credenciais dos secrets ({credentials_info.get('project_id')}) difere do project_id esperado ({project_id}). Usando o project_id das credenciais.")
+                project_id = credentials_info.get("project_id")
+            # st.info("DEBUG: Credenciais carregadas e decodificadas de Base64 dos Streamlit Secrets (ambiente de deploy).")
         else:
             st.error("ERRO: Credenciais 'GOOGLE_APPLICATION_CREDENTIALS' não encontradas nos Streamlit Secrets.")
-            st.error("Certifique-se de configurar GOOGLE_APPLICATION_CREDENTIALS na interface do Streamlit Cloud.")
+            st.error("Certifique-se de configurar GOOGLE_APPLICATION_CREDENTIALS nos Secrets do Streamlit Cloud (agora como Base64).")
             st.stop()
     except StreamlitSecretNotFoundError:
         st.error(f"ERRO: Credenciais não carregadas. Nenhum arquivo secrets.toml encontrado localmente "
-                 f"e o arquivo '{CREDENTIALS_PATH_LOCAL}' também não existe.")
+                 f"e o arquivo '{CREDENTIALS_PATH_PATH}' também não existe.")
         st.error("Para desenvolvimento local, coloque 'chave-de-servico.json' em 'credentials/'.")
         st.error("Para deploy, configure 'GOOGLE_APPLICATION_CREDENTIALS' nos Secrets do Streamlit Cloud (agora como Base64).")
         st.stop()
@@ -66,15 +64,23 @@ else:
 # Se chegamos até aqui e as credenciais foram carregadas com sucesso, podemos criar o cliente BigQuery.
 if credentials and project_id:
     client = bigquery.Client(credentials=credentials, project=project_id)
-    # st.info("DEBUG: Cliente BigQuery inicializado com sucesso.") # Comentado
+    # st.info("DEBUG: Cliente BigQuery inicializado com sucesso.")
 else:
     st.error("ERRO FATAL: Credenciais ou Project ID não foram carregados com sucesso. Verifique a configuração.")
     st.stop()
 
 
-# --- Restante das Constantes e Funções Auxiliares ---
+# --- Restante das Constantes ---
 TAXA_ADWORK_PERCENT = 0.17 # 17% (a taxa percentual em si, usada para cálculo)
 DEFAULT_USD_BRL_RATE = 5.00 # Cotação padrão para caso a API falhe
+
+# --- Nomes das Tabelas BigQuery (COM OS CAMINHOS COMPLETOS FORNECIDOS) ---
+# <<<<<<< ESTAS VARIÁVEIS PRECISAM ESTAR AQUI, ANTES DE serem usadas nas funções >>>>>>>
+ADX_DOMAIN_UTMS_TABLE = "`dashboard-474222.ad_manager.adx_domain_with_utms_daily`"
+CAMPAIGN_INSIGHTS_TABLE = "`dashboard-474222.facebook_ads_data.campaign_insights`"
+
+
+# --- FUNÇÕES AUXILIARES ---
 
 @st.cache_data(ttl=datetime.timedelta(hours=24)) # Cache a cotação por 24 horas
 def get_usd_to_brl_rate():
@@ -107,7 +113,7 @@ def format_number(value, currency=False, percentage=False, decimal_places=0):
     if percentage:
         return f"{value:,.{decimal_places}f}%".replace(",", "X").replace(".", ",").replace("X", ".")
     if currency:
-        return f"R${value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return f"{value:,.{decimal_places}f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def calculate_percentage_delta(current_value, previous_value):
@@ -122,8 +128,7 @@ def calculate_percentage_delta(current_value, previous_value):
         if current_val_num == 0:
             return 0.0 # Sem mudança (0 para 0)
         else:
-            # Evita divisão por zero quando o valor anterior é 0 e o atual não
-            return None # Indica delta indeterminado
+            return None 
     
     delta = ((current_val_num - previous_val_num) / previous_val_num) * 100
     return delta
@@ -132,6 +137,7 @@ def calculate_percentage_delta(current_value, previous_value):
 def calculate_business_metrics(df, default_taxa_adwork_percent=TAXA_ADWORK_PERCENT):
     """
     Calcula todas as métricas de negócio e mídia a partir de um DataFrame.
+    MODIFICAÇÃO: 'total_leads' agora é a soma de leads e mensagens.
     """
     numeric_cols_to_fill = [
         'total_impressoes', 'total_cliques', 'total_custo',
@@ -142,7 +148,7 @@ def calculate_business_metrics(df, default_taxa_adwork_percent=TAXA_ADWORK_PERCE
 
     for col in numeric_cols_to_fill:
         if col in df_processed.columns:
-            df_processed[col] = df_processed[col].fillna(0)
+            df_processed[col] = pd.to_numeric(df_processed[col], errors='coerce').fillna(0)
         else:
             df_processed[col] = 0.0
 
@@ -150,6 +156,11 @@ def calculate_business_metrics(df, default_taxa_adwork_percent=TAXA_ADWORK_PERCE
     total_cliques = df_processed['total_cliques'].sum()
     total_custo = df_processed['total_custo'].sum()
     total_receita = df_processed['total_receita'].sum()
+    
+    # MODIFICAÇÃO AQUI: total_leads agora é a soma de leads e mensagens
+    total_leads_original = df_processed['total_leads'].sum() # Salva leads originais caso precise
+    total_mensagens = df_processed['total_mensagens'].sum()
+    total_leads_combined = total_leads_original + total_mensagens # Nova métrica combinada
 
     total_receita = float(total_receita)
     total_custo = float(total_custo)
@@ -161,12 +172,18 @@ def calculate_business_metrics(df, default_taxa_adwork_percent=TAXA_ADWORK_PERCE
     roas = 0.0
     if total_custo != 0:
         roi = ((total_receita - total_custo) / total_custo) * 100
-        roas = (total_receita / total_custo) * 100
-    # Se custo é 0 mas há receita, ROI/ROAS é considerado infinito
+        roas = (total_receita / total_custo)
     elif total_receita > 0:
-        roi = float('inf')
-        roas = float('inf')
+        roi = np.nan # Use np.nan para ROI indefinido
+        roas = np.nan # Use np.nan para ROAS indefinido
+        
+    cpm = (total_custo / total_impressoes * 1000) if total_impressoes != 0 else 0
+    cpc = (total_custo / total_cliques) if total_cliques != 0 else 0
+    ctr = (total_cliques / total_impressoes * 100) if total_impressoes != 0 else 0
     
+    # MODIFICAÇÃO AQUI: CPL usa a nova métrica combinada
+    cpl = (total_custo / total_leads_combined) if total_leads_combined != 0 else 0
+
     return {
         'total_impressoes': total_impressoes,
         'total_cliques': total_cliques,
@@ -175,11 +192,17 @@ def calculate_business_metrics(df, default_taxa_adwork_percent=TAXA_ADWORK_PERCE
         'lucro_liquido': lucro_liquido,
         'roi': roi,
         'roas': roas,
-        'custo_taxa_adwork': custo_taxa_adwork
+        'custo_taxa_adwork': custo_taxa_adwork,
+        'total_leads': total_leads_combined, # Retorna a métrica combinada como 'total_leads'
+        'total_mensagens': total_mensagens, # Mantém mensagens separadas no retorno
+        'cpm': cpm,
+        'cpc': cpc,
+        'ctr': ctr,
+        'cpl': cpl
     }
 
-# --- Função para Carregar Dados do BigQuery ---
-@st.cache_data(ttl=3600) # Cache os dados por 1 hora (3600 segundos)
+# --- Função para Carregar Dados do BigQuery (Generalizada) ---
+@st.cache_data(ttl=3600)
 def get_data_from_bigquery(query_sql):
     """
     Executa uma consulta SQL no BigQuery e retorna os resultados em um DataFrame Pandas.
@@ -188,132 +211,126 @@ def get_data_from_bigquery(query_sql):
         query_job = client.query(query_sql)
         with st.spinner("Carregando dados do BigQuery..."):
             df = query_job.to_dataframe()
-            # Garante que a coluna 'data' seja do tipo datetime, essencial para Plotly e formatação
             if 'data' in df.columns:
                 df['data'] = pd.to_datetime(df['data'])
-            
-            # Garante que as novas colunas existam, mesmo que vazias, para evitar KeyError
-            for col in ['utm_campaign_norm', 'pais']:
-                if col not in df.columns:
-                    df[col] = None # Define como None, que será tratado como NaN pelo Pandas
         return df
     except Exception as e:
         st.error(f"Erro ao executar a consulta BigQuery: {e}")
         st.warning("Verifique sua consulta SQL e as permissões da conta de serviço no BigQuery.")
         return pd.DataFrame()
 
-@st.cache_data(ttl=3600) # Cache os dados por 1 hora (3600 segundos)
+
+@st.cache_data(ttl=3600)
 def load_data_for_period(start_date, end_date):
     """
-    Carrega dados do BigQuery para o período especificado, unindo Meta Ads e Admanager.
-    Incorpora a lógica de UTM e domínio canônico fornecida pelo usuário.
+    Carrega dados do BigQuery para o período especificado, unindo dados de Admanager
+    e insights de campanha (Meta Ads) via FULL OUTER JOIN.
+    Assume que revenue da tabela adx_domain_utms_daily está em USD e spend da campaign_insights está em BRL.
     Converte receita do Admanager de USD para BRL.
-    Retorna o DataFrame completo (sem filtro de domínio/utm/país ainda).
+    Retorna o DataFrame completo.
     """
-    meta_ads_campaign_insights_table = f"`{project_id}.facebook_ads_data.campaign_insights`"
-    ad_manager_universal_table = f"`{project_id}.ad_manager.admanager_universal`"
-    ad_manager_utms_units_table = f"`{project_id}.ad_manager.admanager_utms_units`"
-
-    # Formata as datas para a consulta SQL
     start_date_str = start_date.strftime('%Y-%m-%d')
     end_date_str = end_date.strftime('%Y-%m-%d')
 
-    query = f"""
-    WITH agg AS (
-      SELECT
-        COALESCE(adx_ad_unit, ad_unit) AS ad_unit_key,
-        domain,
-        SUM(impressions) AS imp
-      FROM {ad_manager_universal_table}
-      WHERE domain IS NOT NULL AND domain <> ''
-        AND date BETWEEN '{start_date_str}' AND '{end_date_str}'
-      GROUP BY 1, 2
+    query_combined = f"""
+    WITH AdX_Formatted AS (
+        SELECT
+            FORMAT_DATE('%Y-%m-%d', adx.date) AS data,
+            adx.country AS pais,
+            adx.domain AS dominio,
+            adx.network_code AS network_code,
+            adx.impressions AS adx_impressions,
+            adx.clicks AS adx_clicks,
+            adx.revenue AS adx_revenue_usd, -- Renomeado para indicar USD
+            LOWER(TRIM(adx.utm_campaign)) AS utm_campaign_norm,
+            LOWER(TRIM(adx.utm_source)) AS utm_source,
+            LOWER(TRIM(adx.utm_medium)) AS utm_medium,
+            LOWER(TRIM(adx.utm_content)) AS utm_content,
+            LOWER(TRIM(adx.utm_term)) AS utm_term,
+            LOWER(TRIM(adx.utm_id)) AS utm_id
+        FROM
+            {ADX_DOMAIN_UTMS_TABLE} AS adx
+        WHERE
+            adx.date BETWEEN '{start_date_str}' AND '{end_date_str}'
     ),
-    ranked AS (
-      SELECT
-        ad_unit_key, domain, imp,
-        ROW_NUMBER() OVER (PARTITION BY ad_unit_key ORDER BY imp DESC) AS rn
-      FROM agg
-    ),
-    dim_adunit AS (
-      SELECT ad_unit_key, domain
-      FROM ranked
-      WHERE rn = 1
-    ),
-
-    -- 2) UTM de campanha por domínio (derivado de ad_manager.admanager_utms_units)
-    utm_campaign_by_domain AS (
-      SELECT
-        u.date                                                 AS data,
-        LOWER(TRIM(COALESCE(u.utm_value, u.utm_value_api)))   AS utm_campaign_norm,
-        d.domain                                              AS dominio,
-        SUM(u.impressions) AS adm_imp,
-        SUM(u.clicks)      AS adm_clk,
-        SUM(u.revenue)     AS adm_rev
-      FROM {ad_manager_utms_units_table} u
-      LEFT JOIN dim_adunit d
-        ON d.ad_unit_key = COALESCE(u.adx_ad_unit, u.ad_unit)
-      WHERE u.date BETWEEN '{start_date_str}' AND '{end_date_str}'
-        AND u.utm_key = 'utm_campaign'
-      GROUP BY 1,2,3
-    ),
-
-    -- 3) Bloco do Admanager (UTM) no shape final (como você já estava usando)
-    admanager_utm AS (
-      SELECT
-        CAST(u.date AS DATE)                    AS data,
-        CAST('Admanager (UTM)' AS STRING)       AS source,
-        CAST(NULL AS STRING)                    AS pais, -- Explicitamente NULL conforme a query fornecida
-        CAST(d.domain AS STRING)                AS dominio,
-        LOWER(TRIM(COALESCE(u.utm_value, u.utm_value_api))) AS utm_campaign_norm, -- Adicionado UTM da Admanager
-        CAST(SUM(u.impressions) AS INT64)       AS total_impressoes,
-        CAST(SUM(u.clicks) AS INT64)            AS total_cliques,
-        CAST(NULL AS FLOAT64)                   AS total_custo, -- Custo não é da Admanager aqui
-        CAST(SUM(u.revenue) AS FLOAT64)         AS total_receita,  -- USD (moeda da rede)
-        CAST(NULL AS INT64)                     AS total_leads,
-        CAST(NULL AS INT64)                     AS total_mensagens
-      FROM {ad_manager_utms_units_table} u
-      LEFT JOIN dim_adunit d
-        ON d.ad_unit_key = COALESCE(u.adx_ad_unit, u.ad_unit)
-      WHERE u.date BETWEEN '{start_date_str}' AND '{end_date_str}'
-      GROUP BY 1,2,3,4, utm_campaign_norm -- utm_campaign_norm adicionado ao GROUP BY
-    ),
-
-    -- 4) Meta Ads ligado por campanha à malha de domínios do Admanager
-    meta_ads_joined AS (
-      SELECT
-        CAST(m.Date AS DATE)                                       AS data,
-        CAST('Meta Ads' AS STRING)                                 AS source,
-        CAST(NULL AS STRING)                                       AS pais, -- Explicitamente NULL conforme a query fornecida
-        CAST(u.dominio AS STRING)                                  AS dominio,
-        LOWER(TRIM(m.Campaign_Name))                               AS utm_campaign_norm, -- UTM do Meta Ads
-        CAST(SUM(m.Impressions) AS INT64)                          AS total_impressoes,
-        CAST(SUM(m.Clicks) AS INT64)                               AS total_cliques,
-        CAST(SUM(m.Spend) AS FLOAT64)                              AS total_custo,
-        CAST(NULL AS FLOAT64)                                      AS total_receita, -- Receita não vem do Meta Ads neste join
-        CAST(SUM(m.Leads) AS INT64)                                AS total_leads,
-        CAST(SUM(m.Messages) AS INT64)                             AS total_mensagens
-      FROM {meta_ads_campaign_insights_table} m
-      LEFT JOIN utm_campaign_by_domain u
-        ON u.data = CAST(m.Date AS DATE)
-       AND u.utm_campaign_norm = LOWER(TRIM(m.Campaign_Name))
-      WHERE m.Date BETWEEN '{start_date_str}' AND '{end_date_str}'
-      GROUP BY 1,2,3,4, utm_campaign_norm
+    CI_Formatted AS (
+        SELECT
+            FORMAT_DATE('%Y-%m-%d', ci.date) AS data,
+            LOWER(TRIM(ci.campaign_name)) AS campaign_name_norm,
+            ci.spend AS ci_spend,
+            ci.leads AS ci_leads,
+            ci.messages AS ci_messages,
+            ci.impressions AS ci_impressions, 
+            ci.clicks AS ci_clicks
+        FROM
+            {CAMPAIGN_INSIGHTS_TABLE} AS ci
+        WHERE
+            ci.date BETWEEN '{start_date_str}' AND '{end_date_str}'
     )
-
-    -- 5) UNION das duas fontes, já padronizadas
-    SELECT * FROM meta_ads_joined
-    UNION ALL
-    SELECT * FROM admanager_utm
-    ORDER BY data, source, pais, dominio, utm_campaign_norm
+    SELECT
+        COALESCE(adx.data, ci.data) AS data,
+        CASE
+            WHEN adx.utm_campaign_norm IS NOT NULL AND ci.campaign_name_norm IS NOT NULL THEN 'Admanager (UTM) & Meta Ads'
+            WHEN adx.utm_campaign_norm IS NOT NULL THEN 'Admanager (UTM)'
+            WHEN ci.campaign_name_norm IS NOT NULL THEN 'Meta Ads'
+            ELSE 'Unknown' -- Caso algo dê muito errado, mas não deve acontecer com WHERE
+        END AS source,
+        -- Colunas que vêm predominantemente do AdX, serão NULL para Meta Ads-only
+        COALESCE(adx.pais, 'N/A') AS pais,
+        COALESCE(adx.dominio, 'N/A') AS dominio,
+        COALESCE(adx.network_code, 'N/A') AS network_code,
+        
+        -- Métricas: AGORA COALESCE SOMA IMPRESSÕES E CLIQUES DE AMBAS AS FONTES
+        COALESCE(adx.adx_impressions, 0) + COALESCE(ci.ci_impressions, 0) AS total_impressoes,
+        COALESCE(adx.adx_clicks, 0) + COALESCE(ci.ci_clicks, 0) AS total_cliques,
+        COALESCE(ci.ci_spend, 0) AS total_custo, -- Custo vem só de Campaign Insights
+        COALESCE(adx.adx_revenue_usd, 0) AS total_receita, -- Receita vem só de AdX (USD)
+        COALESCE(ci.ci_leads, 0) AS total_leads, -- Leads vem só de Campaign Insights
+        COALESCE(ci.ci_messages, 0) AS total_mensagens, -- Mensagens vem só de Campaign Insights
+        
+        -- UTMs: usar a versão normalizada da campanha e os outros UTMs do AdX
+        COALESCE(adx.utm_campaign_norm, ci.campaign_name_norm) AS utm_campaign_norm,
+        COALESCE(adx.utm_source, 'N/A') AS utm_source,
+        COALESCE(adx.utm_medium, 'N/A') AS utm_medium,
+        COALESCE(adx.utm_content, 'N/A') AS utm_content,
+        COALESCE(adx.utm_term, 'N/A') AS utm_term,
+        COALESCE(adx.utm_id, 'N/A') AS utm_id
+    FROM
+        AdX_Formatted AS adx
+    FULL OUTER JOIN
+        CI_Formatted AS ci
+    ON
+        adx.data = ci.data AND adx.utm_campaign_norm = ci.campaign_name_norm
     """
-    df = get_data_from_bigquery(query)
+    
+    df_combined = get_data_from_bigquery(query_combined)
 
-    if not df.empty:
+    if not df_combined.empty:
+        # Converter a receita do Admanager de USD para BRL
         usd_to_brl_rate = get_usd_to_brl_rate()
-        
-        # Converte a receita que vem do Admanager (agora marcado como source 'Admanager (UTM)')
-        df['total_receita'] = pd.to_numeric(df['total_receita'], errors='coerce').fillna(0)
-        df.loc[df['source'] == 'Admanager (UTM)', 'total_receita'] *= usd_to_brl_rate
-        
-    return df
+        if usd_to_brl_rate and usd_to_brl_rate != 0:
+            # A conversão aplica-se SOMENTE às linhas que possuem receita original do Admanager (que está em USD)
+            # Para as linhas puramente Meta Ads, total_receita será 0 e não será alterada.
+            df_combined['total_receita'] = pd.to_numeric(df_combined['total_receita'], errors='coerce').fillna(0) # Garante que é numérico
+            df_combined['total_receita'] *= usd_to_brl_rate
+        else:
+            st.warning("Não foi possível obter a taxa de câmbio USD-BRL. A receita Admanager pode não estar convertida corretamente para BRL.")
+            
+    # --- Conversões finais de tipos de dados e tratamento de NaNs ---
+    numeric_cols = [
+        'total_impressoes', 'total_cliques', 'total_custo', 'total_receita',
+        'total_leads', 'total_mensagens'
+    ]
+    for col in numeric_cols:
+        df_combined[col] = pd.to_numeric(df_combined[col], errors='coerce').fillna(0)
+
+    string_cols = [
+        'source', 'pais', 'dominio', 'network_code', 'utm_campaign_norm', 'utm_source', 'utm_medium', 
+        'utm_content', 'utm_term', 'utm_id'
+    ]
+    for col in string_cols:
+        if col not in df_combined.columns:
+            df_combined[col] = 'N/A'
+        df_combined[col] = df_combined[col].fillna('N/A').astype(str)
+
+    return df_combined
